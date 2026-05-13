@@ -1,82 +1,169 @@
-from openai import OpenAI
-from langchain_community.vectorstores import Chroma
-from langchain_community.embeddings import HuggingFaceEmbeddings
-import os
+from __future__ import annotations
 
-# ==========================================
-# 1. 初始化豆包大模型客户端
-# 大模型API：Doubao-Seed-2.0-lite
-# ==========================================
-client = OpenAI(
-    base_url="https://ark.cn-beijing.volces.com/api/v3",
-    api_key="993af805-a176-4a1a-9980-b79d3ba17f7f",
-)
-MODEL_ENDPOINT = "ep-m-20260320165100-f55rq" # 接入点 ID
+import argparse
+import json
+import sys
 
-# ==========================================
-# 2. 连接本地知识库 (免去重新解析文档的时间)
-# ==========================================
-print("🧠 正在唤醒本地公文知识库...")
-embeddings = HuggingFaceEmbeddings(model_name="BAAI/bge-small-zh-v1.5")
-# 直接读取你刚才生成的 chroma_db 文件夹
-vector_db = Chroma(persist_directory="./chroma_db", embedding_function=embeddings)
-print("✅ 知识库连接成功！")
+from agents.workflow import AgenticWorkflow
+from agents.reviewer import Reviewer
+from agents.searcher import Searcher
+from agents.writer import Writer
+from config import ConfigurationError, Settings
+from knowledge_base.builder import build_knowledge_base
+from knowledge_base.index_store import KnowledgeBase
+from llm_client import LLMClient
+from logging_utils import configure_logging
+from rag.reranker import BGEReranker
+from rag.retriever import HybridRetriever
+from schemas import Evidence, WorkflowResult
 
-# ==========================================
-# 3. 核心 RAG 生成函数
-# ==========================================
-def generate_official_document(user_query):
-    print(f"\n🔍 正在检索与【{user_query}】相关的历史公文规范...")
-    
-    # 步骤 A：去数据库里找最相关的 3 个文本块
-    retrieved_docs = vector_db.similarity_search(user_query, k=3)
-    
-    # 步骤 B：把找到的文本块拼接成一段长文本，作为“参考背景”
-    context_text = "\n\n---\n\n".join([doc.page_content for doc in retrieved_docs])
-    print("✅ 检索完毕，已获取相关参考规范。")
-    
-    # 步骤 C：构建极其重要的 RAG Prompt（提示词工程）
-    system_prompt = """你是一个资深的央企公文写作专家。
-请【严格】基于我提供的<参考文件>中的行文规范、特定称谓和政策精神，来撰写公文。
-如果参考文件中没有包含你需要的信息，你可以基于你的专业知识补充，但绝不能捏造政策文件号或虚假数据。
-"""
-    
-    user_prompt = f"""
-                <参考文件>
-                {context_text}
-                </参考文件>
 
-                用户需求：{user_query}
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
 
-                请根据上述需求和参考文件，起草一份结构完整、用词严谨的公文。
-                """
-    
-    print("🔄 正在深度思考并起草公文中，请稍候...")
-    
-    # 步骤 D：调用大模型
-    response = client.chat.completions.create(
-        model=MODEL_ENDPOINT,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ],
-        temperature=0.2 # 极低的温度，保证遵循参考文件，拒绝幻觉
+    settings = Settings.load()
+    configure_logging(settings.log_level)
+
+    try:
+        if args.command == "build":
+            return command_build(args, settings)
+        if args.command == "inspect":
+            return command_inspect(args, settings)
+        if args.command == "draft":
+            return command_draft(args, settings)
+    except (ConfigurationError, RuntimeError, FileNotFoundError, ValueError) as exc:
+        print(f"[ERROR] {exc}", file=sys.stderr)
+        return 1
+
+    parser.print_help()
+    return 1
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="国企公文 Agentic Workflow CLI")
+    subparsers = parser.add_subparsers(dest="command")
+
+    build = subparsers.add_parser("build", help="构建结构化 RAG 知识库")
+    build.add_argument("--docs", default="./docs", help="PDF 文档目录，默认 ./docs")
+
+    inspect = subparsers.add_parser("inspect", help="查看混合检索和 BGE rerank 结果")
+    inspect.add_argument("query", help="检索问题")
+    inspect.add_argument("--top-k", type=int, default=5, help="返回证据数量")
+    inspect.add_argument("--recall-k", type=int, default=16, help="每路召回候选数量")
+
+    draft = subparsers.add_parser("draft", help="运行 Searcher-Writer-Reviewer 工作流")
+    draft.add_argument("query", help="公文起草需求")
+    draft.add_argument("--max-rounds", type=int, default=2, help="最多返工轮数")
+    draft.add_argument("--top-k", type=int, default=6, help="每轮输入 Writer 的证据数量")
+    draft.add_argument("--json", action="store_true", help="以 JSON 输出完整结果")
+    return parser
+
+
+def command_build(args: argparse.Namespace, settings: Settings) -> int:
+    kb = build_knowledge_base(args.docs, settings)
+    vector_count = kb.vector_store.db.count()
+    bm25_count = len(kb.bm25_store.chunks)
+    print("知识库构建完成")
+    print(f"- Chroma collection: {settings.chroma_collection}")
+    print(f"- Chroma chunks: {vector_count}")
+    print(f"- BM25 chunks: {bm25_count}")
+    print(f"- Chroma dir: {settings.chroma_dir}")
+    print(f"- BM25 dir: {settings.bm25_dir}")
+    return 0
+
+
+def command_inspect(args: argparse.Namespace, settings: Settings) -> int:
+    kb = KnowledgeBase.load(settings)
+    reranker = BGEReranker(settings)
+    retriever = HybridRetriever(kb, reranker)
+    evidence = retriever.retrieve(args.query, top_k=args.top_k, recall_k=args.recall_k)
+    print_evidence(evidence)
+    return 0
+
+
+def command_draft(args: argparse.Namespace, settings: Settings) -> int:
+    settings.require_llm()
+    kb = KnowledgeBase.load(settings)
+    llm = LLMClient(settings)
+    reranker = BGEReranker(settings)
+    retriever = HybridRetriever(kb, reranker)
+    workflow = AgenticWorkflow(
+        searcher=Searcher(llm, retriever),
+        writer=Writer(llm),
+        reviewer=Reviewer(llm),
     )
-    
-    return response.choices[0].message.content
+    result = workflow.run(args.query, max_rounds=args.max_rounds, top_k=args.top_k)
+    if args.json:
+        print(json.dumps(workflow_to_dict(result), ensure_ascii=False, indent=2))
+    else:
+        print_workflow_result(result)
+    return 0
 
-# ==========================================
-# 4. 运行测试
-# ==========================================
+
+def print_evidence(evidence: list[Evidence]) -> None:
+    if not evidence:
+        print("未检索到结果。")
+        return
+    for index, item in enumerate(evidence, start=1):
+        print(f"\n[{index}] score={item.score:.4f} source={item.source} page={item.page}")
+        print(f"路径：{item.title_path}")
+        print(f"分数：{item.score_details}")
+        preview = item.content.replace("\n", " ")
+        print(preview[:500] + ("..." if len(preview) > 500 else ""))
+
+
+def print_workflow_result(result: WorkflowResult) -> None:
+    print("\n=== 最终公文草稿 ===\n")
+    print(result.final_document)
+    print("\n=== Reviewer 结果 ===")
+    print(f"action: {result.review.action}")
+    if result.review.summary:
+        print(f"summary: {result.review.summary}")
+    if result.review.issues:
+        print("issues:")
+        for item in result.review.issues:
+            print(f"- {item}")
+    if result.review.suggestions:
+        print("suggestions:")
+        for item in result.review.suggestions:
+            print(f"- {item}")
+    print("\n=== 参考依据 ===")
+    print_evidence(result.evidence)
+    print("\n=== 工作流轨迹 ===")
+    for event in result.trace:
+        print(f"- [{event.step}] {event.message} {event.metadata}")
+
+
+def workflow_to_dict(result: WorkflowResult) -> dict:
+    return {
+        "final_document": result.final_document,
+        "review": {
+            "action": result.review.action,
+            "issues": result.review.issues,
+            "missing_evidence": result.review.missing_evidence,
+            "suggestions": result.review.suggestions,
+            "summary": result.review.summary,
+        },
+        "evidence": [
+            {
+                "id": item.id,
+                "content": item.content,
+                "source": item.source,
+                "page": item.page,
+                "title_path": item.title_path,
+                "score": item.score,
+                "score_details": item.score_details,
+            }
+            for item in result.evidence
+        ],
+        "trace": [
+            {"step": event.step, "message": event.message, "metadata": event.metadata}
+            for event in result.trace
+        ],
+        "rounds_used": result.rounds_used,
+    }
+
+
 if __name__ == "__main__":
-    print("=" * 50)
-    print("🚀 公文书写智能体 (RAG 增强版) 已启动")
-    print("=" * 50)
-    
-    # 你可以把这里换成你想测试的任何需求
-    test_query = "我需要一份4.23开评审会的会议通知：会议名称是“政企行业销售能力培训”，会议密级，会议地点，分享人，会议内容，请帮我起草正文。"
-    
-    final_result = generate_official_document(test_query)
-    
-    print("\n🎉 === 最终生成的专业公文 === 🎉\n")
-    print(final_result) 
+    raise SystemExit(main())

@@ -1,32 +1,22 @@
-import os
-from openai import OpenAI
+from __future__ import annotations
 
-# 从环境变量中获取您的API KEY，配置方法见：https://www.volcengine.com/docs/82379/1399008
-api_key = os.getenv('ARK_API_KEY')
+from config import Settings
+from llm_client import LLMClient
 
-client = OpenAI(
-    base_url="https://ark.cn-beijing.volces.com/api/v3",
-    api_key="993af805-a176-4a1a-9980-b79d3ba17f7f",
-)
 
-response = client.responses.create(
-    model="doubao-seed-2-0-lite-260215",
-    input=[
-        {
-            "role": "user",
-            "content": [
+def main() -> int:
+    settings = Settings.load()
+    settings.require_llm()
+    llm = LLMClient(settings)
+    response = llm.complete(
+        "你是一个接口连通性测试助手。",
+        "请回复：LLM 配置可用。",
+        temperature=0.0,
+        max_tokens=64,
+    )
+    print(response)
+    return 0
 
-                {
-                    "type": "input_image",
-                    "image_url": "https://ark-project.tos-cn-beijing.volces.com/doc_image/ark_demo_img_1.png"
-                },
-                {
-                    "type": "input_text",
-                    "text": "你看见了什么？"
-                },
-            ],
-        }
-    ]
-)
 
-print(response)
+if __name__ == "__main__":
+    raise SystemExit(main())
