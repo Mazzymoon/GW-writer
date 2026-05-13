@@ -5,6 +5,7 @@ from typing import Any, Literal
 
 
 ReviewAction = Literal["pass", "revise", "retrieve_again"]
+WorkflowStatus = Literal["passed", "needs_more_evidence"]
 
 
 @dataclass(frozen=True)
@@ -63,3 +64,5 @@ class WorkflowResult:
     evidence: list[Evidence]
     trace: list[WorkflowEvent]
     rounds_used: int
+    status: WorkflowStatus = "passed"
+    final_message: str = ""

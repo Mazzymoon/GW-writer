@@ -9,6 +9,9 @@ from agents.searcher import Searcher
 from agents.writer import Writer
 from schemas import Evidence, ReviewResult, WorkflowEvent, WorkflowResult
 
+
+INSUFFICIENT_EVIDENCE_MESSAGE = "知识库依据不足，无法生成合规版本。"
+
 logger = logging.getLogger(__name__)
 
 
@@ -75,11 +78,25 @@ class AgenticWorkflow:
                 break
 
         elapsed = time.perf_counter() - started
-        trace.append(WorkflowEvent("workflow", "Finished", {"elapsed_seconds": round(elapsed, 2)}))
+        status = "needs_more_evidence" if review.action == "retrieve_again" else "passed"
+        final_message = INSUFFICIENT_EVIDENCE_MESSAGE if status == "needs_more_evidence" else ""
+        trace.append(
+            WorkflowEvent(
+                "workflow",
+                "Finished",
+                {
+                    "elapsed_seconds": round(elapsed, 2),
+                    "status": status,
+                    "final_message": final_message,
+                },
+            )
+        )
         return WorkflowResult(
             final_document=draft,
             review=review,
             evidence=evidence,
             trace=trace,
             rounds_used=len([event for event in trace if event.step == "round"]),
+            status=status,  # type: ignore[arg-type]
+            final_message=final_message,
         )

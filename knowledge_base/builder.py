@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 
 from config import Settings
-from document_parser.pdf_parser import load_pdf_pages
+from document_parser.document_loader import load_document_pages
 from document_parser.title_tree import parse_sections
 from knowledge_base.bm25_store import BM25Store
 from knowledge_base.chunker import chunk_sections
@@ -15,9 +15,9 @@ logger = logging.getLogger(__name__)
 
 
 def build_knowledge_base(docs_dir: str | Path, settings: Settings) -> KnowledgeBase:
-    logger.info("Loading PDF pages from %s", docs_dir)
-    pages = load_pdf_pages(docs_dir)
-    logger.info("Loaded %s pages", len(pages))
+    logger.info("Loading documents from %s", docs_dir)
+    pages = load_document_pages(docs_dir)
+    logger.info("Loaded %s document pages/units", len(pages))
 
     sections = parse_sections(pages)
     logger.info("Parsed %s structural sections", len(sections))

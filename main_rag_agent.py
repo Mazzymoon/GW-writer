@@ -45,7 +45,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command")
 
     build = subparsers.add_parser("build", help="构建结构化 RAG 知识库")
-    build.add_argument("--docs", default="./docs", help="PDF 文档目录，默认 ./docs")
+    build.add_argument("--docs", default="./docs", help="文档目录，支持 .pdf/.md/.txt，默认 ./docs")
 
     inspect = subparsers.add_parser("inspect", help="查看混合检索和 BGE rerank 结果")
     inspect.add_argument("query", help="检索问题")
@@ -114,6 +114,11 @@ def print_evidence(evidence: list[Evidence]) -> None:
 
 
 def print_workflow_result(result: WorkflowResult) -> None:
+    if result.status == "needs_more_evidence":
+        print("\n=== 生成状态 ===\n")
+        print(result.final_message)
+        print("以下草稿仅为失败轮次的中间产物，不应作为合规版本使用。")
+
     print("\n=== 最终公文草稿 ===\n")
     print(result.final_document)
     print("\n=== Reviewer 结果 ===")
@@ -162,6 +167,8 @@ def workflow_to_dict(result: WorkflowResult) -> dict:
             for event in result.trace
         ],
         "rounds_used": result.rounds_used,
+        "status": result.status,
+        "final_message": result.final_message,
     }
 
 
