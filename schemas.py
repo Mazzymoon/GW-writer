@@ -42,6 +42,13 @@ class SearchResult:
 
 
 @dataclass(frozen=True)
+class ToolCallRecord:
+    tool_name: str
+    arguments: dict[str, Any]
+    result_summary: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class ReviewResult:
     action: ReviewAction
     issues: list[str]
@@ -66,3 +73,4 @@ class WorkflowResult:
     rounds_used: int
     status: WorkflowStatus = "passed"
     final_message: str = ""
+    memory_cases: list[str] = field(default_factory=list)

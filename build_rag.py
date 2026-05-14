@@ -8,7 +8,7 @@ from logging_utils import configure_logging
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="兼容入口：构建结构化公文 RAG 知识库")
+    parser = argparse.ArgumentParser(description="兼容入口：构建公文知识检索索引")
     parser.add_argument("--docs", default="./docs", help="PDF 文档目录")
     args = parser.parse_args()
 

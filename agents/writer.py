@@ -18,14 +18,23 @@ class Writer:
         *,
         previous_draft: str | None = None,
         review_suggestions: list[str] | None = None,
+        memory_cases: list[str] | None = None,
     ) -> str:
         evidence_text = format_evidence(evidence)
         system_prompt = """你是资深央企公文写作专家。你必须基于参考依据起草正式、克制、结构完整的公文草稿。
 要求：
 1. 不编造不存在的政策文件号、数据、会议地点、联系人或日期。
-2. 用户未给出的关键要素，用【待补充：要素名】标注。
+2. 用户未给出的关键要素，用〖待补充：要素名〗标注。
 3. 语言符合国企/机关公文风格，避免口语化表达。
 4. 文末列出“参考依据”，用编号引用检索片段。"""
+
+        memory_block = ""
+        if memory_cases:
+            memory_block = f"""
+历史成功案例：
+历史成功案例仅用于参考结构、语气和要素组织方式。不得照搬其中的具体事实、时间、地点、联系人、单位名称、项目名称或数据。最终草稿必须以用户输入和工具返回依据为准。
+{chr(10).join(f"--- 案例 {index} ---{chr(10)}{case}" for index, case in enumerate(memory_cases, start=1))}
+"""
 
         revision_block = ""
         if previous_draft:
@@ -44,6 +53,8 @@ Reviewer 修改建议：
 
 参考依据：
 {evidence_text}
+
+{memory_block}
 
 {revision_block}
 

@@ -19,6 +19,9 @@ class Settings:
     chroma_dir: Path
     chroma_collection: str
     bm25_dir: Path
+    memory_dir: Path
+    memory_collection: str
+    enable_long_term_memory: bool
     log_level: str
     redis_url: str
 
@@ -34,6 +37,9 @@ class Settings:
             chroma_dir=Path(os.getenv("CHROMA_DIR", "./chroma_db")),
             chroma_collection=os.getenv("CHROMA_COLLECTION", "official_documents_agentic"),
             bm25_dir=Path(os.getenv("BM25_DIR", "./bm25_index")),
+            memory_dir=Path(os.getenv("MEMORY_DIR", "./memory_db")),
+            memory_collection=os.getenv("MEMORY_COLLECTION", "gw_writer_success_cases"),
+            enable_long_term_memory=parse_bool(os.getenv("ENABLE_LONG_TERM_MEMORY", "true")),
             log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
             redis_url=os.getenv("REDIS_URL", "redis://localhost:6379/0"),
         )
@@ -63,3 +69,12 @@ def load_env_file(env_file: str | Path) -> None:
         key = key.strip()
         value = value.strip().strip('"').strip("'")
         os.environ.setdefault(key, value)
+
+
+def parse_bool(value: str) -> bool:
+    normalized = value.strip().lower()
+    if normalized in {"true", "1", "yes", "y", "on"}:
+        return True
+    if normalized in {"false", "0", "no", "n", "off"}:
+        return False
+    raise ConfigurationError(f"Invalid boolean value: {value}")

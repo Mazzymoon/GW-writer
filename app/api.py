@@ -17,7 +17,7 @@ def create_app():
         max_rounds: int = 2
         top_k: int = 6
 
-    app = FastAPI(title="国企公文 Agentic Workflow API", version="0.1.0")
+    app = FastAPI(title="国企公文多 Agent 智能写作系统 API", version="0.1.0")
 
     @app.get("/health")
     def health() -> dict:
@@ -36,7 +36,7 @@ def create_app():
     async def draft(_: DraftRequest) -> dict:
         return {
             "status": "not_implemented",
-            "message": "CLI is the primary delivery path in this phase. Wire this endpoint to AgenticWorkflow next.",
+            "message": "CLI is the primary delivery path in this phase. Wire this endpoint to the multi-agent writing workflow next.",
         }
 
     return app
